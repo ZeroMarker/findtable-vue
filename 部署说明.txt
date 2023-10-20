@@ -1,0 +1,8 @@
+1. src目录下面的iMedView放到imedical/web/scripts_lib下面;
+2. csp目录中的页面放到csp目录下面;
+3. 在系统中创建cls文件.
+
+访问: 
+
+/imedical/web/csp/dhctt.findglobal.vue.csp
+/imedical/web/csp/dhctt.findtablestructure.vue.csp

@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<!-- 程序版本: 0.3.0.20210915 -->
+<!-- 创建人: puruidong -->
+<!-- dhcctt.findtablestructure.vue.csp 表结构查询工具-Vue版 -->
+<html>
+<head>
+<title>表结构查询工具-Vue版</title>
+  <script type="text/javascript" src="../scripts_lib/iMedView/el-lib/axios/0.21.1/axios.min.js"></script>
+  <script type="text/javascript" src="../scripts_lib/iMedView/el-lib/vue/2.6.14/vue.min.js"></script>
+  <link rel="stylesheet" href="../scripts_lib/iMedView/el-lib/element-ui/2.15.6/index.min.css">
+  <script src="../scripts_lib/iMedView/el-lib/element-ui/2.15.6/index.min.js" charset="UTF-8"></script>
+<style>
+  html,body {
+       height: 100%;
+  }
+  
+  #app {
+     height: 100%;
+    }
+
+    body{
+       margin-top:30px;
+    }
+    
+    .el-table .success-row td{
+      background: #f0f9eb!important;
+    }
+</style>
+<Server>
+s namespace=%request.Get("namespace")
+s package=%request.Get("package")
+s class=%request.Get("class")
+// 获取命名空间列表.
+s nameSpaceList=##class(web.FindTableInfoVue).getNameSpaceList()
+// 为csp页面的js注入session信息.
+d ##Class(websys.Configuration).HeadSession()
+</Server>
+
+</head>
+<body>
+  <div id="app"></div>
+  <script type="text/x-template" id="maincomponent">
+  <div v-loading.fullscreen.lock="fullscreenLoading" element-loading-text="正在加载,请稍候..." element-loading-spinner="el-icon-loading" element-loading-background="rgba(0, 0, 0, 0.8)">
+    <el-row>
+      <el-col :span="22" :offset="1">
+        <el-backtop></el-backtop>
+        <h2 class="main-title">表结构查询工具-Vue版</h2>
+        <div style="margin:5px 0;">
+          <el-dropdown>
+        <span class="el-dropdown-link">
+          菜单列表<i class="el-icon-arrow-down el-icon--right"></i>
+        </span>
+        <el-dropdown-menu slot="dropdown">
+          <el-dropdown-item icon="el-icon-zoom-in" @click.native="openUrl('findtablestructure')">表结构查询</el-dropdown-item>
+          <el-dropdown-item icon="el-icon-zoom-out" @click.native="openUrl('findglobal')">Global查询</el-dropdown-item>
+        </el-dropdown-menu>
+        </el-dropdown>
+        </div>
+        <el-form :inline="true" @submit.native.prevent ref="searchForm">
+          <el-form-item label="命名空间">
+            <el-select v-model="searchForm.nameSpaceSelect" @change="nameSpaceChange" filterable clearable placeholder="请选择">
+              <el-option v-for="item in searchForm.nameSpaceArr" :key="item.value" :label="item.label" :value="item.value"></el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="包">
+            <el-select v-model="searchForm.packageSelect" :loading="searchForm.packageSelectLoading" remote :remote-method="onPackageRemoteQuery" @change="packageChange" filterable clearable placeholder="请输入关键词">
+              <el-option v-for="item in searchForm.packageArr" :key="item.value" :label="item.label" :value="item.value"></el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item label="类">
+            <el-select v-model="searchForm.classNameSelect" :loading="searchForm.classNameSelectLoading" remote :remote-method="onClassNameRemoteQuery" @change="classNameChange" filterable clearable placeholder="请选择">
+              <el-option v-for="item in searchForm.classNameArr" :key="item.value" :label="item.label" :value="item.value"></el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" icon="el-icon-search" @click="onQuery">查询</el-button>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="success" icon="el-icon-refresh-right" @click="clearSearch">清空</el-button>
+          </el-form-item>
+        </el-form>
+      </el-col>
+    </el-row>
+    <el-row>
+      <el-col :span="22" :offset="1">
+        <el-form :inline="true" @submit.native.prevent>
+          <el-form-item label="">
+            <el-button type="warning" @click="parentClassClick" icon="el-icon-arrow-up">{{searchForm.parentTableName?searchForm.parentTableName:"暂无父表"}}</el-button>
+          </el-form-item>
+          <el-form-item label="">
+            <el-button type="success" @click="setDefaultNamespacePackageClass" icon="el-icon-refresh-left">默认命名空间、包名</el-button>
+          </el-form-item>
+          <el-form-item label="">
+            <el-button type="info" @click="copyTxt($event,searchForm.sqlTableName)" icon="el-icon-coin">{{searchForm.sqlTableName?searchForm.sqlTableName:"暂无表名"}}</el-button>
+          </el-form-item>
+          <el-form-item label="">
+            <el-button @click="copyTxt($event,searchForm.packageSelect+'.'+searchForm.classNameSelect)" icon="el-icon-folder">{{searchForm.packageSelect+"."+searchForm.classNameSelect}}</el-button>
+          </el-form-item>
+          <el-form-item label="子表">
+            <el-select v-model="searchForm.childClassNameSelect" @change="childClassNameChange" filterable clearable placeholder="请选择">
+              <el-option v-for="item in searchForm.childClassNameArr" :key="item.value" :label="item.label" :value="item.value"></el-option>
+            </el-select>
+          </el-form-item>
+        </el-form>
+      </el-col>
+    </el-row>
+    <el-row>
+      <el-col :span="22" :offset="1">
+        <h3>表索引结构
+          <i style="margin:0 5px;" @click="changeTableVisible('showIndexTableFlag')" :class="indexDataTable.showIndexTableFlag?'el-icon-arrow-down':'el-icon-arrow-right'"></i></h3>
+        <div v-show="indexDataTable.showIndexTableFlag">
+          <p style="margin:5px;" v-show="indexDataTable.Total>0">共{{indexDataTable.Total}}条数据.</p>
+          <el-table :data="indexDataTable.filterData" border stripe :height="tableHeight" :row-class-name="indexTableRowClassName" style="width: 100%;height:800px;">
+            <el-table-column type="index" fixed align="center" width="100"></el-table-column>
+            <el-table-column v-for="item in indexDataTable.Title" :key="item.prop" :type="item.type" align="left" :prop="item.prop" :label="item.label" :fixed="item.fixed" :sortable="item.sortable" :width="item.width">
+              <template slot-scope="scope">
+                <div v-if='scope.$index == 0'>
+                  <input class="el-input__inner" @input="indexTableSearch($event, item.prop)" size="small" :placeholder="'搜索'+item.label" /></div>
+                <div v-else>{{ scope.row[scope.column.property] }}</div></template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-col>
+    </el-row>
+    <el-row>
+      <el-col :span="22" :offset="1">
+        <h3>数据索引明细<i style="margin:0 5px;" @click="changeTableVisible('showTableFlag')" :class="table.showTableFlag?'el-icon-arrow-down':'el-icon-arrow-right'"></i></h3>
+        <div v-show="table.showTableFlag">
+          <el-table :data="table.Data" border stripe :height="tableHeight" style="width: 100%;height:800px;">
+            <el-table-column type="index" fixed align="left" width="80"></el-table-column>
+            <el-table-column v-for="item in table.Title" :key="item.prop" :type="item.type" align="left" :prop="item.prop" :sortable="item.sortable" :label="item.label" :fixed="item.fixed" :width="item.width">
+              <template slot-scope="scope">
+                <div v-if='scope.$index == 0'>
+                  <input class="el-input__inner" @input="tableSearch($event, item.prop)" size="small" :placeholder="'搜索'+item.label" /></div>
+                <div v-else>{{ scope.row[scope.column.property] }}</div></template>
+            </el-table-column>
+          </el-table>
+          <div style="margin:5px 0;">
+            <el-pagination @size-change="handleSizeChange" @current-change="handleCurrentChange" :current-page="table.currentPage" :page-sizes="table.pageSizeArray" :page-size="table.pageSize" layout="total, sizes, prev, pager, next, jumper" :total="table.Total"></el-pagination>
+          </div>
+        </div>
+      </el-col>
+    </el-row>
+    <el-row>
+      <el-col :span="22" :offset="1">
+        <el-divider></el-divider>
+        <el-collapse accordion>
+          <el-collapse-item title="更新日志">
+            <!-- item -->
+            <div>2021-09-28</div>
+            <div>
+              <ol>
+                <li>[升级]索引表格增加搜索功能;</li>
+                <li>[升级]索引表格高亮data属性行;</li>
+                <li>[升级]索引表格将data属性行置顶在第一行;</li>
+                <li>[升级]索引表格,属性表格增加折叠功能;</li>
+                <li>[升级]索引表格,属性表格,返回数据为空不添加搜索条件;</li>
+                <li>[升级]索引表格,属性表格,返回数据为空隐藏对应模块;</li>
+                <li>[升级]增加类对应的表名;</li>
+                <li>[修复]属性表格: 当前页数未归0,在搜索/选择子类或父类时,出现数据加载为空的问题;</li></ol>
+            </div>
+            <!-- item end -->
+            <!-- item -->
+            <div>2021-09-27</div>
+            <div>
+              <ol>
+                <li>页面优化;</li>
+                <li>包,类名下拉加载改为后台动态加载(提升加载速度);</li>
+                <li>子类改为下拉展示;</li>
+                <li>属性分页展示;</li>
+                <li>后台方法整理优化(后台方法参考自: web.Util.DHCJFClassGlobal.cls);</li>
+                <li>提供默认命名空间和包名.</li>
+                <li>未完成: 属性搜索,索引首行添加搜索框,实现搜索.</li></ol>
+            </div>
+            <!-- item end --></el-collapse-item>
+        </el-collapse>
+      </el-col>
+    </el-row>
+    <el-row>
+      <el-col :span="22" :offset="1">
+        <el-divider></el-divider>
+        <small>版本: 0.1.0.20210928 由 西南技术支持中心 提供驱动.支持浏览器: Chrome: latest/latest-2 ,联系: puruidong@mediway.cn ,若想贡献代码,请邮箱联系.</small></el-col>
+    </el-row>
+  </div>
+   </script>
+    <script type="text/javascript">
+        let ServerObj = {
+      nameSpaceList: #(nameSpaceList)#,
+      namespace:"#(namespace)#",
+      package:"#(package)#",
+      class:"#(class)#",
+    };
+    axios.defaults.headers.post['Content-Type'] = 'application/x-www-form-urlencoded';
+    // 添加请求拦截器
+    axios.interceptors.request.use(function(config) {
+      let ret = '';
+      let data = config.data;
+      for (let it in data) {
+        ret += encodeURIComponent(it) + '=' + data[it] + '&'
+      }
+      config.data = ret;
+
+      // 在发送请求之前做些什么
+      return config;
+    },
+    function(error) {
+      // 对请求错误做些什么
+      return Promise.reject(error);
+    });
+
+    function getCurrTime() {
+      let time = new Date();
+      return time.getHours() + ":" + time.getMinutes() + ":" + time.getSeconds();
+    }
+
+    let app = new Vue({
+      el: "#app",
+      template: '#maincomponent',
+      data: {
+        fullscreenLoading: false,
+        tableHeight: window.innerHeight,
+        table: {
+          SearchKeywordObj: {},
+          showTableFlag: false,
+          Data: [],
+          pageSizeArray: [20, 50, 100, 200, 500, 1000, 2000, 999999],
+          pageSize: 20,
+          currentPage: 1,
+          Total: 0,
+          Title: [{
+            prop: "propertyName",
+            label: "属性名",
+            fixed: true,
+            width: "200",
+            sortable: true
+          },
+          {
+            prop: "propertyNode",
+            label: "附加节点",
+            width: "180",
+            sortable: true
+          },
+          {
+            prop: "propertyDeli",
+            label: "分割符",
+            width: "180",
+            sortable: true
+          },
+          {
+            prop: "propertyPiece",
+            label: "分割位",
+            width: "180",
+            sortable: true
+          },
+          {
+            prop: "propertyType",
+            label: "类型",
+            width: "180",
+            sortable: true
+          },
+          {
+            prop: "propertyField",
+            label: "字段名",
+            width: "280",
+            sortable: true
+          },
+          {
+            prop: "Description",
+            label: "注释",
+            width: "200",
+            sortable: true
+          },
+          {
+            prop: "propertyColumn",
+            label: "PLIST位置",
+            width: "150",
+            sortable: true
+          },
+          ]
+        },
+        indexDataTable: {
+          Data: [],
+          filterData: [],
+          SearchKeywordObj: {},
+          showIndexTableFlag: false,
+          Total: 0,
+          Title: [{
+            prop: "indexType",
+            label: "索引类型",
+            width: "150",
+            sortable: true
+          },
+          {
+            prop: "indexName",
+            label: "索引名",
+            width: "200",
+            sortable: true
+          },
+          {
+            prop: "indexMasterData",
+            label: "索引结构",
+            width: "",
+            sortable: true
+          },
+          ]
+        },
+        tableSelected: [],
+        searchForm: {
+          classNameArr: [],
+          packageArr: [],
+          nameSpaceArr: [],
+          nameSpaceSelect: "",
+          packageSelect: "",
+          classNameSelect: "",
+          packageSelectLoading: false,
+          classNameSelectLoading: false,
+          parentTableName: "",
+          /// 父表
+          childClassNameSelect: "",
+          /// 子表选中.
+          childClassNameArr: [],
+          /// 子表列表
+          sqlTableName: "",
+          /// 类对应的表名
+        },
+      },
+      methods: {
+        showLoading: function() {
+          if (!this.fullscreenLoading) {
+            this.fullscreenLoading = true;
+          }
+        },
+        hideLoading: function() {
+          if (this.fullscreenLoading) {
+            let that = this;
+            setTimeout(function() {
+              that.fullscreenLoading = false;
+            },
+            1500)
+          }
+        },
+        handleSizeChange: function(val) {
+          this.table.pageSize = val;
+          this.onQuery();
+        },
+        handleCurrentChange: function(val) {
+          this.table.currentPage = val;
+          this.onQuery();
+        },
+        nameSpaceChange: function(val) {
+          this.searchForm.packageArr = [];
+        },
+        packageChange: function(val) {
+          this.searchForm.classNameArr = [];
+        },
+        classNameChange: function(val) {
+          this.table.currentPage = 1;
+          this.onQuery();
+        },
+        loadClassTableName: function() {
+          let classNameValue = this.searchForm.classNameSelect;
+          this.searchForm.sqlTableName = "";
+          let that = this;
+          axios.post('dhc.nurse.ip.common.getdata.csp', {
+            className: "web.FindTableInfoVue",
+            methodName: "getClassSQLTableName",
+            limit: "",
+            parameter1: that.searchForm.nameSpaceSelect,
+            parameter2: that.searchForm.packageSelect,
+            parameter3: classNameValue,
+          }).then(function(response) {
+            let data = response.data.replace("\r\n", "").replace("\r", "").replace("\n", "");
+            if (data) {
+              that.searchForm.sqlTableName = data;
+            }
+          }).catch(function(error) {
+            console.log(error);
+          });
+
+        },
+        childClassNameChange: function() {
+          this.table.currentPage = 1;
+          this.selectNewClass(this.searchForm.childClassNameSelect);
+        },
+        onQuery: function() {
+          /// 加载父类
+          this.onClassParentTableQuery();
+          /// 加载子类列表
+          this.onClassChildTableQuery();
+          /// 加载索引
+          this.onIndexTableQuery();
+          /// 加载索引属性明细
+          this.onPropertyTableQuery();
+          /// 加载类对应的表名
+          this.loadClassTableName();
+        },
+        selectNewClass: function(newClassName) {
+          this.searchForm.classNameArr = [{
+            label: newClassName,
+            value: newClassName
+          }];
+          this.searchForm.classNameSelect = newClassName;
+          this.onQuery();
+        },
+        parentClassClick: function() {
+          if (!this.searchForm.parentTableName) {
+            return;
+          }
+          this.table.currentPage = 1;
+          let parentTableName = this.searchForm.parentTableName;
+          this.selectNewClass(parentTableName);
+        },
+        onPackageRemoteQuery: function(keyword) {
+          if (!keyword || !this.searchForm.nameSpaceSelect) {
+            return false;
+          }
+          this.searchForm.packageSelectLoading = true;
+          let that = this;
+          axios.post('dhc.nurse.ip.common.getdata.csp', {
+            className: "web.FindTableInfoVue",
+            methodName: "getPackageList",
+            limit: "",
+            parameter1: that.searchForm.nameSpaceSelect,
+            parameter2: keyword,
+          }).then(function(response) {
+            if (response) {
+              that.searchForm.packageArr = response.data;
+            }
+            that.searchForm.packageSelectLoading = false;
+          }).catch(function(error) {
+            console.log(error);
+            that.searchForm.packageSelectLoading = false;
+          });
+        },
+        onClassNameRemoteQuery: function(keyword) {
+          if (!keyword || !this.searchForm.nameSpaceSelect || !this.searchForm.packageSelect) {
+            return false;
+          }
+          this.searchForm.classNameSelectLoading = true;
+          let that = this;
+          axios.post('dhc.nurse.ip.common.getdata.csp', {
+            className: "web.FindTableInfoVue",
+            methodName: "getClassNameList",
+            limit: "",
+            parameter1: that.searchForm.nameSpaceSelect,
+            parameter2: that.searchForm.packageSelect,
+            parameter3: keyword,
+          }).then(function(response) {
+            if (response) {
+              that.searchForm.classNameArr = response.data;
+            }
+            that.searchForm.classNameSelectLoading = false;
+          }).catch(function(error) {
+            console.log(error);
+            that.searchForm.classNameSelectLoading = false;
+          });
+        },
+        onClassParentTableQuery: function() {
+          if (!this.searchForm.classNameSelect || !this.searchForm.nameSpaceSelect || !this.searchForm.packageSelect) {
+            return false;
+          }
+          let that = this;
+          this.searchForm.parentTableName = "";
+          axios.post('dhc.nurse.ip.common.getdata.csp', {
+            className: "web.FindTableInfoVue",
+            methodName: "getParentTable",
+            limit: "",
+            parameter1: that.searchForm.nameSpaceSelect,
+            parameter2: that.searchForm.packageSelect,
+            parameter3: that.searchForm.classNameSelect,
+          }).then(function(response) {
+            let data = response.data.replace("\r\n", "").replace("\r", "").replace("\n", "");
+            if (data) {
+              that.searchForm.parentTableName = data;
+            }
+
+          }).catch(function(error) {
+            console.log(error);
+          });
+        },
+        onClassChildTableQuery: function() {
+          if (!this.searchForm.classNameSelect || !this.searchForm.nameSpaceSelect || !this.searchForm.packageSelect) {
+            return false;
+          }
+          let that = this;
+          axios.post('dhc.nurse.ip.common.getdata.csp', {
+            className: "web.FindTableInfoVue",
+            methodName: "getChildTableList",
+            limit: "",
+            parameter1: that.searchForm.nameSpaceSelect,
+            parameter2: that.searchForm.packageSelect,
+            parameter3: that.searchForm.classNameSelect,
+          }).then(function(response) {
+            that.searchForm.childClassNameSelect = "";
+            if (response) {
+              that.searchForm.childClassNameArr = response.data;
+            }
+          }).catch(function(error) {
+            console.log(error);
+          });
+        },
+        onPropertyTableQuery: function() {
+          if (!this.searchForm.classNameSelect || !this.searchForm.nameSpaceSelect || !this.searchForm.packageSelect) {
+            return false;
+          }
+          let SearchKeywordJSON = JSON.stringify(this.table.SearchKeywordObj);
+          let that = this;
+          axios.post('dhc.nurse.ip.common.getdata.csp', {
+            className: "web.FindTableInfoVue",
+            methodName: "getPropertyListJSON",
+            limit: "",
+            parameter1: that.table.pageSize,
+            parameter2: that.table.currentPage,
+            parameter3: that.searchForm.nameSpaceSelect,
+            parameter4: that.searchForm.packageSelect,
+            parameter5: that.searchForm.classNameSelect,
+            parameter6: "",
+            parameter7: "",
+            parameter8: SearchKeywordJSON,
+          }).then(function(response) {
+            if (response && response.data) {
+              that.table.Data = response.data.Data;
+              that.table.Total = response.data.Total;
+              /// 数据为空时,隐藏表格.
+              that.table.showTableFlag = response.data.Total > 0;
+            }
+          }).catch(function(error) {
+            console.log(error);
+          });
+        },
+        setDefaultNamespacePackageClass: function() {
+          this.searchForm.nameSpaceArr = [{
+            label: "DHC-APP",
+            value: "DHC-APP"
+          }];
+          this.searchForm.packageArr = [{
+            label: "User",
+            value: "User"
+          }];
+          this.searchForm.nameSpaceSelect = "DHC-APP";
+          this.searchForm.packageSelect = "User";
+        },
+        onIndexTableQuery: function() {
+          if (!this.searchForm.classNameSelect || !this.searchForm.nameSpaceSelect || !this.searchForm.packageSelect) {
+            return false;
+          }
+          this.showLoading();
+          let that = this;
+          axios.post('dhc.nurse.ip.common.getdata.csp', {
+            className: "web.FindTableInfoVue",
+            methodName: "getTableMasterJSON",
+            limit: "",
+            parameter1: that.searchForm.nameSpaceSelect,
+            parameter2: that.searchForm.packageSelect,
+            parameter3: that.searchForm.classNameSelect,
+          }).then(function(response) {
+            if (response) {
+              let rowsData = response.data;
+              that.indexDataTable.Data = rowsData.Data;
+              that.indexDataTable.filterData = rowsData.Data;
+              that.indexDataTable.Total = rowsData.Total;
+              /// 数据为空时,隐藏表格.
+              that.indexDataTable.showIndexTableFlag = rowsData.Total > 0;
+            }
+            that.hideLoading();
+          }).catch(function(error) {
+            console.log(error);
+            that.hideLoading();
+          });
+        },
+        tableSearch: function(event, prop) {
+          let SearchKeywordObj = this.table.SearchKeywordObj;
+          SearchKeywordObj[prop] = event.target.value;
+          this.table.SearchKeywordObj = SearchKeywordObj;
+          this.onPropertyTableQuery();
+        },
+        indexTableSearch: function(event, prop) {
+          let SearchKeywordObj = this.indexDataTable.SearchKeywordObj;
+          SearchKeywordObj[prop] = event.target.value;
+          let isNullFlag = true;
+          for (let value of Object.values(SearchKeywordObj)) {
+            if (value) {
+              isNullFlag = false;
+            }
+          }
+
+          if (isNullFlag) {
+            this.indexDataTable.filterData = this.indexDataTable.Data;
+            return;
+          }
+
+          let tempFilterData = this.indexDataTable.Data.filter(function(item) {
+            let find = true;
+            for (let[k, v] of Object.entries(SearchKeywordObj)) {
+              if (v) {
+                if (item[k].toLocaleUpperCase().indexOf(v.toLocaleUpperCase()) == -1) {
+                  find = false;
+                }
+              }
+            }
+            return find;
+          });
+
+          let tempNullData = [this.indexDataTable.Data[0]];
+          this.indexDataTable.filterData = [...tempNullData, ...tempFilterData];
+
+        },
+        changeTableVisible: function(visibleStr) {
+          switch (visibleStr) {
+          case "showTableFlag":
+            this.table.showTableFlag = !this.table.showTableFlag;
+            break;
+          case "showIndexTableFlag":
+            this.indexDataTable.showIndexTableFlag = !this.indexDataTable.showIndexTableFlag;
+            break;
+          }
+          // 'showTableFlag'
+        },
+        indexTableRowClassName: function({row,rowIndex}) {
+          if (row["indexType"] === "data") {
+            return 'success-row';
+          }
+          return '';
+        },
+        copyTxt:function(event,text) {
+          if(!text){
+          return;   
+          }
+        var aux = document.createElement("input"); 
+          aux.setAttribute("value", text); 
+          document.body.appendChild(aux); 
+          aux.select();
+          document.execCommand("copy"); 
+          document.body.removeChild(aux);
+        this.$message({
+              message: '复制成功!',
+              type: 'success'
+            });
+      },
+      clearSearch:function(){
+          this.indexDataTable.Data = [];
+        this.indexDataTable.filterData =[];
+        this.indexDataTable.Total = 0;
+        this.indexDataTable.SearchKeywordObj={};
+        this.table.SearchKeywordObj={};
+        this.table.Data =[];
+        this.table.Total = 0;
+        this.searchForm.nameSpaceSelect = "DHC-APP";
+        this.searchForm.packageSelect = "User";
+        this.searchForm.childClassNameArr = [];
+        this.searchForm.classNameSelect="";
+        this.searchForm.sqlTableName = "";
+        this.searchForm.classNameArr = [];
+        this.table.currentPage = 1;
+        },
+        openUrl:function(key){
+          let url="";
+          switch(key){
+          case "findtablestructure":
+            url="dhctt.findtablestructure.vue.csp";
+          break;
+          case "findglobal":
+            url="dhcctt.findglobal.vue.csp";
+          break;   
+          }
+          if(url){
+          window.open(url);   
+          }
+        }
+      },
+      mounted: function() {
+
+      },
+      created: function() {
+        if (ServerObj.nameSpaceList && ServerObj.nameSpaceList.length > 0) {
+          this.searchForm.nameSpaceArr = ServerObj.nameSpaceList;
+        }
+        this.setDefaultNamespacePackageClass();
+        this.table.showTableFlag = true;
+        this.indexDataTable.showIndexTableFlag = true;
+        if(ServerObj.namespace && ServerObj.package && ServerObj.class){
+           this.searchForm.nameSpaceArr = [{
+              label: ServerObj.namespace,
+              value: ServerObj.namespace
+            }];
+            this.searchForm.packageArr = [{
+              label: ServerObj.package,
+              value: ServerObj.package
+            }];
+            this.searchForm.classNameArr = [{
+            label: ServerObj.class,
+              value: ServerObj.class    
+          }];
+            this.searchForm.nameSpaceSelect = ServerObj.namespace;
+            this.searchForm.packageSelect = ServerObj.package;      
+            this.searchForm.classNameSelect = ServerObj.class;
+          this.onQuery();
+        }
+      }
+    })
+    </script>
+</body>
+</HTML>
